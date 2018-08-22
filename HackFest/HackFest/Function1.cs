@@ -11,6 +11,7 @@ using System.Net.Http;
 using System.Threading.Tasks;
 using System.Linq;
 using Newtonsoft.Json.Linq;
+using System;
 
 namespace HackFest
 {
@@ -19,46 +20,91 @@ namespace HackFest
         private static HttpClient client = new HttpClient();
 
         [FunctionName("Function1")]
-        public static async Task<IActionResult> Run([HttpTrigger(AuthorizationLevel.Function, "post", Route = null)]HttpRequest req, ILogger log)
+        public static async Task<IActionResult> Run([HttpTrigger(AuthorizationLevel.Function, "post", Route = null)]HttpRequest req, ILogger log,
+            [CosmosDB("Ratings", "Ratings", ConnectionStringSetting = "hackfestapi_DOCUMENTDB")] IAsyncCollector<RatingData> ratingData)
         {
             log.LogInformation("Received request");
-
+            HttpResponseMessage response = null;
             string requestBody = new StreamReader(req.Body).ReadToEnd();
             dynamic data = JsonConvert.DeserializeObject(requestBody);
 
-            string userId = data?.name;
+            string userId = data?.userId;
             string productId = data?.productId;
             if (int.TryParse(data?.rating.ToString(), out int rating))
             {
-                if (rating > 5)
+                if (rating > 5 && rating < 0)
                 {
-                    new BadRequestObjectResult("Rating higher that 5");
+                    return new BadRequestObjectResult("Rating must be between 0 and 5");
                 }
             }
             else
             {
-                new BadRequestObjectResult("Invalid Rating");
+                return new BadRequestObjectResult("Invalid Rating");
             }
 
             if (productId != null)
             {
                 string productApiUrl = $"http://serverlessohproduct.trafficmanager.net/api/GetProduct?productId={productId}";
-                var response = await client.GetAsync(productApiUrl);
+                response = await client.GetAsync(productApiUrl);
+                if (response.StatusCode == System.Net.HttpStatusCode.BadRequest)
+                {
+                    return new BadRequestObjectResult("Invalid Product id");
+                }
+
                 string productsAPIResonse = await response.Content.ReadAsStringAsync();
                 dynamic products = JsonConvert.DeserializeObject(productsAPIResonse);
                 if (products?.productId == null)
                 {
-                    new BadRequestObjectResult("Invalid Product id");
+                    return new BadRequestObjectResult("Invalid Product id");
                 }
             }
             else
             {
-                new BadRequestObjectResult("Product id is required");
+                return new BadRequestObjectResult("Product id is required");
             }
 
+            if (userId != null)
+            {
+                string userApiUrl = $"http://serverlessohuser.trafficmanager.net/api/Getuser?userId={userId}";
+                response = await client.GetAsync(userApiUrl);
+                if (response.StatusCode == System.Net.HttpStatusCode.BadRequest)
+                {
+                    return new BadRequestObjectResult("Invalid Product id");
+                }
+                string usersAPIResonse = await response.Content.ReadAsStringAsync();
+                dynamic users = JsonConvert.DeserializeObject(usersAPIResonse);
+                if (users?.userId == null)
+                {
+                    return new BadRequestObjectResult("Invalid user id");
+                }
+            }
+            else
+            {
+                return new BadRequestObjectResult("user id is required");
+            }
 
-            return new OkObjectResult("Created");
+            var ratingDocument = new RatingData
+            {
+                id = Guid.NewGuid().ToString(),
+                userId = data.userId,
+                productId = data.productId,
+                timestamp = DateTime.UtcNow,
+                rating = rating,
+                userNotes = data.userNotes
+            };
+            await ratingData.AddAsync(ratingDocument);
+
+            return new OkObjectResult(ratingDocument);
         }
+    }
+    public class RatingData
+    {
+        public string id { get; set; }
+        public string userId { get; set; }
+        public string productId { get; set; }
+        public DateTime timestamp { get; set; }
+        public int rating { get; set; }
+        public string userNotes { get; set; }
     }
 }
 
