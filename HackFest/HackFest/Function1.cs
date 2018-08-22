@@ -19,7 +19,7 @@ namespace HackFest
     {
         private static HttpClient client = new HttpClient();
 
-        [FunctionName("Function1")]
+        [FunctionName("CreateRating")]
         public static async Task<IActionResult> Run([HttpTrigger(AuthorizationLevel.Function, "post", Route = null)]HttpRequest req, ILogger log,
             [CosmosDB("Ratings", "Ratings", ConnectionStringSetting = "hackfestapi_DOCUMENTDB")] IAsyncCollector<RatingData> ratingData)
         {
